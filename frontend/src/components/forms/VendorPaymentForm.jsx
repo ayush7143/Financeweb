@@ -436,18 +436,23 @@ const VendorPaymentForm = ({ payment, onSubmit: onFormSubmit, onCancel, showForm
               <label htmlFor="status" className={labelStyles}>
                 Status
               </label>
-              <select
-                id="status"
-                name="status"
-                value={formData.status}
-                onChange={handleChange}
-                className={selectStyles}
-                required
-              >
-                <option value="Pending">Pending</option>
-                <option value="Approved">Approved</option>
-                <option value="Rejected">Rejected</option>
-              </select>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <CheckCircleIcon className="h-5 w-5 text-gray-400" />
+                </div>
+                <select
+                  id="status"
+                  name="status"
+                  value={formData.status}
+                  onChange={handleChange}
+                  className={`${selectStyles} pl-10`}
+                  required
+                >
+                  <option value="Pending">Pending</option>
+                  <option value="Paid">Paid</option>
+                  <option value="Cancelled">Cancelled</option>
+                </select>
+              </div>
             </div>
           </div>
           

@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const { sendResetEmail } = require('../../utils/emailService');
 
 // Generate JWT token
 const generateToken = (id) => {
@@ -119,11 +120,23 @@ exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
     
+    // Validate email input
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required' });
+    }
+
+    console.log('Password reset requested for email:', email);
+    
     const user = await User.findOne({ email });
     
     if (!user) {
-      return res.status(404).json({ message: 'No user found with that email' });
+      // For security, don't reveal if email exists or not
+      return res.json({ 
+        message: 'If an account with that email exists, password reset instructions have been sent.'
+      });
     }
+
+    console.log('User found for password reset:', user.email);
     
     // Generate reset token
     const resetToken = crypto.randomBytes(20).toString('hex');
@@ -138,13 +151,28 @@ exports.forgotPassword = async (req, res) => {
     user.resetPasswordExpires = Date.now() + 3600000;
     
     await user.save();
+    console.log('Reset token saved for user:', user.email);
     
-    // In a real app, you would send an email with the reset link
-    // For now, just return the token
-    res.json({ 
-      message: 'Password reset initiated',
-      resetToken 
-    });
+    try {
+      // Send reset email
+      await sendResetEmail(email, resetToken);
+      console.log('Password reset email sent successfully to:', email);
+      
+      res.json({ 
+        message: 'Password reset instructions have been sent to your email address.'
+      });
+    } catch (emailError) {
+      console.error('Email sending error:', emailError);
+      
+      // Remove the reset token if email failed to send
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpires = undefined;
+      await user.save();
+      
+      res.status(500).json({ 
+        message: 'Failed to send password reset email. Please check your email configuration and try again.' 
+      });
+    }
   } catch (error) {
     console.error('Forgot password error:', error);
     res.status(500).json({ message: 'Server error during password reset request' });
@@ -264,5 +292,54 @@ exports.changePassword = async (req, res) => {
   } catch (error) {
     console.error('Change password error:', error);
     res.status(500).json({ message: 'Server error changing password' });
+  }
+};
+
+// @desc    Google OAuth success callback
+// @route   GET /api/auth/google/callback
+// @access  Public
+exports.googleCallback = async (req, res) => {
+  try {
+    const user = req.user;
+    
+    if (!user) {
+      return res.redirect(`${process.env.FRONTEND_URL}/login?error=oauth_failed`);
+    }
+    
+    // Generate JWT token
+    const token = generateToken(user._id);
+    
+    // Redirect to frontend with token
+    res.redirect(`${process.env.FRONTEND_URL}/auth-success?token=${token}`);
+  } catch (error) {
+    console.error('Google callback error:', error);
+    res.redirect(`${process.env.FRONTEND_URL}/login?error=oauth_failed`);
+  }
+};
+
+// @desc    Get Google OAuth user info
+// @route   GET /api/auth/google/user
+// @access  Public (but requires valid session)
+exports.getGoogleUser = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Not authenticated' });
+    }
+    
+    const token = generateToken(req.user._id);
+    
+    res.json({
+      user: {
+        id: req.user._id,
+        name: req.user.name,
+        email: req.user.email,
+        role: req.user.role,
+        avatar: req.user.avatar
+      },
+      token
+    });
+  } catch (error) {
+    console.error('Get Google user error:', error);
+    res.status(500).json({ message: 'Server error fetching user info' });
   }
 }; 

@@ -27,6 +27,7 @@ import {
 import '../styles/dashboard.css';
 import { useCurrencyFormat } from '../utils/formUtils';
 import { calculateProfitMargin } from '../utils/financialCalculations';
+import { refreshFinancialData } from '../utils/dashboardUtils';
 import AIBotWidget from '../components/common/AIBotWidget';
 
 const Dashboard = () => {
@@ -35,6 +36,7 @@ const Dashboard = () => {
   const { settings } = useSettings();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [stats, setStats] = useState(null);
   const [recentTransactions, setRecentTransactions] = useState([]);
   const [chartData, setChartData] = useState(null);
@@ -123,29 +125,35 @@ const Dashboard = () => {
 
   // Fetch dashboard data
   useEffect(() => {
-    const fetchDashboardData = async () => {
+    const fetchDashboardData = async (isRefresh = false) => {
       try {
-        console.log("FETCHING DATA - Starting fresh data fetch");
+        console.log(`FETCHING DATA - ${isRefresh ? 'Refreshing' : 'Starting fresh'} data fetch`);
         
-        // Check for any cached data in localStorage
-        console.log("Checking localStorage for cached chart data:", {
-          hasChartStorage: localStorage.getItem('chartData') !== null
-        });
+        if (isRefresh) {
+          setRefreshing(true);
+        } else {
+          setLoading(true);
+        }
         
-        // Clear any potential chart data in localStorage
+        // Clear any cached data
         localStorage.removeItem('chartData');
+        localStorage.removeItem('dashboardStats');
+        localStorage.removeItem('financialData');
         
-        setLoading(true);
-        
-        // Reset chart data to clear any cached data
+        // Reset all state to clear any cached data
         setChartData(null);
+        setStats(null);
+        setRecentTransactions([]);
         
-        const timestamp = new Date().getTime(); // Add timestamp to avoid caching
+        // Add timestamp to avoid caching
+        const timestamp = Date.now();
+        console.log('Fetching dashboard data with timestamp:', timestamp);
+        
         const [employeeExpensesResponse, salaryExpensesResponse, vendorPaymentsResponse, incomeResponse] = await Promise.all([
-          employeeExpenseApi.getAll({ timestamp }).catch(() => ({ data: [] })),
-          salaryExpenseApi.getAll({ timestamp }).catch(() => ({ data: [] })),
-          vendorPaymentApi.getAll({ timestamp }).catch(() => ({ data: [] })),
-          incomeApi.getAll({ timestamp }).catch(() => ({ data: [] }))
+          employeeExpenseApi.getAll().catch(() => ({ data: [] })),
+          salaryExpenseApi.getAll().catch(() => ({ data: [] })),
+          vendorPaymentApi.getAll().catch(() => ({ data: [] })),
+          incomeApi.getAll().catch(() => ({ data: [] }))
         ]);
 
         // Extract data from responses
@@ -355,6 +363,7 @@ const Dashboard = () => {
         console.error('Error loading dashboard data:', err);
       } finally {
         setLoading(false);
+        setRefreshing(false);
       }
     };
 
@@ -362,11 +371,20 @@ const Dashboard = () => {
 
     // Listen for dashboard refresh events
     const handleDashboardRefresh = () => {
-      fetchDashboardData();
+      fetchDashboardData(true); // Pass true for refresh mode
+    };
+
+    const handleFinancialDataRefresh = () => {
+      fetchDashboardData(true);
     };
 
     window.addEventListener('dashboardRefresh', handleDashboardRefresh);
-    return () => window.removeEventListener('dashboardRefresh', handleDashboardRefresh);
+    window.addEventListener('financialDataRefresh', handleFinancialDataRefresh);
+    
+    return () => {
+      window.removeEventListener('dashboardRefresh', handleDashboardRefresh);
+      window.removeEventListener('financialDataRefresh', handleFinancialDataRefresh);
+    };
   }, []);
 
   // Initialize charts once data is loaded
@@ -515,20 +533,28 @@ const Dashboard = () => {
     let expenseChartInstance = null;
     
     if (!loading && stats && expenseChartRef.current) {
-      // Calculate expense distribution
-      // First, analyze expense data to get real distribution by category
+      console.log('Rendering expense chart with fresh stats:', stats);
+      
+      // Calculate expense distribution - use actual values only
       const employeeExpenses = stats.employeeExpenses || 0;
       const salaryExpenses = stats.salaryExpenses || 0;
       const vendorExpenses = stats.vendorExpenses || 0;
-      const otherExpenses = stats.totalExpenses - (employeeExpenses + salaryExpenses + vendorExpenses);
       
-      // Get real data or use reasonable defaults if not available
+      // Only show chart if there's actual expense data
+      if (employeeExpenses === 0 && salaryExpenses === 0 && vendorExpenses === 0) {
+        // Clear the chart if no data
+        const existingChart = Chart.getChart(expenseChartRef.current);
+        if (existingChart) {
+          existingChart.destroy();
+        }
+        return;
+      }
+      
       const expenseDistribution = [
-        { category: 'Employee Expenses', value: employeeExpenses > 0 ? employeeExpenses : (stats.totalExpenses * 0.35) },
-        { category: 'Salary Expenses', value: salaryExpenses > 0 ? salaryExpenses : (stats.totalExpenses * 0.40) },
-        { category: 'Vendor Payments', value: vendorExpenses > 0 ? vendorExpenses : (stats.totalExpenses * 0.20) },
-        { category: 'Other Expenses', value: otherExpenses > 0 ? otherExpenses : (stats.totalExpenses * 0.05) }
-      ];
+        { category: 'Employee Expenses', value: employeeExpenses },
+        { category: 'Salary Expenses', value: salaryExpenses },
+        { category: 'Vendor Payments', value: vendorExpenses }
+      ].filter(item => item.value > 0); // Only include categories with actual data
       
       // Destroy existing chart if it exists
       const existingChart = Chart.getChart(expenseChartRef.current);
@@ -536,21 +562,22 @@ const Dashboard = () => {
         existingChart.destroy();
       }
       
-      // Create new chart
-      const ctx = expenseChartRef.current.getContext('2d');
-      expenseChartInstance = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-          labels: expenseDistribution.map(item => item.category),
-          datasets: [{
-            data: expenseDistribution.map(item => item.value),
-            backgroundColor: [
-              'rgba(249, 115, 22, 0.9)',  // Orange
-              'rgba(79, 70, 229, 0.9)',   // Indigo
-              'rgba(234, 179, 8, 0.9)',   // Yellow
-              'rgba(20, 184, 166, 0.9)'   // Teal
-            ],
-            borderColor: theme === 'dark' ? 'rgba(30, 30, 30, 0.8)' : 'white',
+      // Only create chart if we have data
+      if (expenseDistribution.length > 0) {
+        const ctx = expenseChartRef.current.getContext('2d');
+        expenseChartInstance = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: expenseDistribution.map(item => item.category),
+            datasets: [{
+              data: expenseDistribution.map(item => item.value),
+              backgroundColor: [
+                'rgba(249, 115, 22, 0.9)',  // Orange
+                'rgba(79, 70, 229, 0.9)',   // Indigo
+                'rgba(234, 179, 8, 0.9)',   // Yellow
+                'rgba(20, 184, 166, 0.9)'   // Teal
+              ].slice(0, expenseDistribution.length),
+              borderColor: theme === 'dark' ? 'rgba(30, 30, 30, 0.8)' : 'white',
             borderWidth: 2,
             hoverOffset: 10,
             spacing: 2
@@ -613,8 +640,8 @@ const Dashboard = () => {
               }
             }
           }
-        }
-        });
+        }});
+      }
     }
     
     return () => {
@@ -810,6 +837,14 @@ const Dashboard = () => {
       <div className="dashboard-container">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold">Dashboard</h1>
+          <button
+            onClick={() => refreshFinancialData()}
+            disabled={refreshing}
+            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          >
+            <RefreshIcon className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing...' : 'Refresh Data'}
+          </button>
         </div>
 
         <p className="dashboard-welcome">

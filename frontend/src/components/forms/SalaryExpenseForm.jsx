@@ -6,6 +6,7 @@ import { salaryExpenseApi } from '../../api/apiService';
 import { CalendarIcon, UserIcon, DocumentTextIcon, BuildingOfficeIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { CheckCircleIcon, ExclamationCircleIcon } from '@heroicons/react/24/solid';
 import { SettingsContext } from '../../context/SettingsContext';
+import { triggerDashboardRefresh } from '../../utils/dashboardUtils';
 
 const SalaryExpenseForm = ({ expense, onSubmit, onCancel, showForm: initialShowForm = false, setShowForm: parentSetShowForm }) => {
   const { id } = useParams();
@@ -109,10 +110,13 @@ const SalaryExpenseForm = ({ expense, onSubmit, onCancel, showForm: initialShowF
         setSuccess('Salary expense created successfully');
       }
       
+      // Trigger dashboard refresh to update charts
+      triggerDashboardRefresh();
+      
       // Refresh the expenses list
       await loadExpenses();
       
-      // Clear the form if it's a new expense
+      // Clear the form only if it's a new expense
       if (!formData._id) {
         setFormData({
           date: '',
@@ -123,6 +127,18 @@ const SalaryExpenseForm = ({ expense, onSubmit, onCancel, showForm: initialShowF
           status: 'Pending',
           notes: ''
         });
+        
+        // Hide the form after successful submission for new entries
+        if (parentSetShowForm) {
+          parentSetShowForm(false);
+        } else {
+          setShowFormState(false);
+        }
+      } else {
+        // For edits, just refresh the current expense data
+        if (id) {
+          await loadExpense();
+        }
       }
       
       // Call onSubmit callback if provided
@@ -130,8 +146,6 @@ const SalaryExpenseForm = ({ expense, onSubmit, onCancel, showForm: initialShowF
         onSubmit();
       }
       
-      // Hide the form after successful submission
-      toggleForm(false);
     } catch (err) {
       console.error('Error submitting form:', err);
       setError(err.response?.data?.message || 'Failed to save salary expense. Please try again.');
@@ -515,6 +529,7 @@ const SalaryExpenseForm = ({ expense, onSubmit, onCancel, showForm: initialShowF
                             if (window.confirm('Are you sure you want to delete this salary expense?')) {
                               salaryExpenseApi.delete(expense._id)
                                 .then(() => {
+                                  triggerDashboardRefresh(); // Trigger dashboard refresh
                                   loadExpenses();
                                   setSuccess('Salary expense deleted successfully');
                                 })

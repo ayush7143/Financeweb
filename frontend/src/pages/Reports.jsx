@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useCurrencyFormat } from '../utils/formUtils';
+import { triggerDashboardRefresh } from '../utils/dashboardUtils';
 import { employeeExpenseApi, salaryExpenseApi, vendorPaymentApi, incomeApi } from '../api/apiService';
 import { motion } from 'framer-motion';
 import { 
@@ -14,6 +15,7 @@ import * as XLSX from 'xlsx';
 const Reports = () => {
   const formatCurrency = useCurrencyFormat();
   const [loading, setLoading] = useState(true);
+  const [fetching, setFetching] = useState(false); // Prevent simultaneous fetches
   const [error, setError] = useState(null);
   const [reports, setReports] = useState({
     employeeExpenses: [],
@@ -32,12 +34,22 @@ const Reports = () => {
   });
   
   const [lastUpdated, setLastUpdated] = useState(new Date());
-
   // Fetch reports based on filters
   const fetchReports = async (currentFilters = filters) => {
+    // Prevent simultaneous fetches
+    if (fetching) {
+      console.log('Fetch already in progress, skipping...');
+      return;
+    }
+    
     try {
+      setFetching(true);
       setLoading(true);
       setError(null);
+
+      // Add cache busting timestamp
+      const timestamp = Date.now();
+      console.log('Fetching reports with cache buster:', timestamp);
 
       const [empExp, salExp, vendPay, incData] = await Promise.all([
         employeeExpenseApi.getAll(),
@@ -54,34 +66,42 @@ const Reports = () => {
 
       // Process and normalize the data with better amount handling
       const processedData = {
-        employeeExpenses: empExp?.data || [],
-        salaryExpenses: salExp?.data?.map(expense => ({
+        employeeExpenses: (empExp?.data || []).map(expense => ({
+          ...expense,
+          amount: Number(expense.amountPaid || expense.amount || 0)
+        })),
+        salaryExpenses: (salExp?.data || []).map(expense => ({
           ...expense,
           date: expense.paymentDate || expense.date,
           amount: Number(expense.amountPaid || expense.amount || expense.salary || 0),
           status: expense.status || 'Pending',
           employeeName: expense.employeeName || 'Unknown'
-        })) || [],
-        vendorPayments: vendPay?.data?.map(payment => ({
+        })),
+        vendorPayments: (vendPay?.data || []).map(payment => ({
           ...payment,
           date: payment.invoiceDate || payment.paymentDate || payment.date,
           amount: Number(payment.amountInclGST || payment.amount || payment.totalAmount || 0),
           status: payment.status || 'Pending',
           vendorName: payment.vendorName || 'Unknown'
-        })) || [],
-        income: incData?.data || []
+        })),
+        income: (incData?.data || []).map(item => ({
+          ...item,
+          amount: Number(item.amountReceived || item.amount || 0)
+        }))
       };
 
       // Validate processed data
-      console.log('Processed amounts:', {
-        salaryExpenses: processedData.salaryExpenses.map(e => ({
-          name: e.employeeName,
-          amount: e.amount
-        })),
-        vendorPayments: processedData.vendorPayments.map(p => ({
-          name: p.vendorName,
-          amount: p.amount
-        }))
+      console.log('Processed amounts for reports:', {
+        totalIncome: processedData.income.reduce((sum, item) => sum + item.amount, 0),
+        totalEmployeeExpenses: processedData.employeeExpenses.reduce((sum, item) => sum + item.amount, 0),
+        totalSalaryExpenses: processedData.salaryExpenses.reduce((sum, item) => sum + item.amount, 0),
+        totalVendorPayments: processedData.vendorPayments.reduce((sum, item) => sum + item.amount, 0),
+        itemCounts: {
+          income: processedData.income.length,
+          employeeExpenses: processedData.employeeExpenses.length,
+          salaryExpenses: processedData.salaryExpenses.length,
+          vendorPayments: processedData.vendorPayments.length
+        }
       });
 
       setReports(processedData);
@@ -92,6 +112,7 @@ const Reports = () => {
       setError('Failed to load reports. Please try again later.');
     } finally {
       setLoading(false);
+      setFetching(false);
     }
   };
 
@@ -107,9 +128,22 @@ const Reports = () => {
     });
     fetchReports();
     
+    // Listen for dashboard refresh events
+    const handleRefresh = () => {
+      console.log('Reports page received refresh event');
+      fetchReports();
+    };
+    
+    window.addEventListener('dashboardRefresh', handleRefresh);
+    window.addEventListener('financialDataRefresh', handleRefresh);
+    
     const intervalId = setInterval(() => fetchReports(), 5 * 60 * 1000); // Refresh every 5 minutes
 
-    return () => clearInterval(intervalId);
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('dashboardRefresh', handleRefresh);
+      window.removeEventListener('financialDataRefresh', handleRefresh);
+    };
   }, []);
 
   // Fetch when filters change
@@ -201,18 +235,36 @@ const Reports = () => {
   };
 
   const calculateTotalIncome = () => {
-    return calculateTotal(reports.income);
+    const total = calculateTotal(reports.income);
+    console.log('Calculating total income:', { reports: reports.income, total });
+    return total;
   };
 
   const calculateTotalExpenses = () => {
     const employeeExpenses = calculateTotal(reports.employeeExpenses);
     const salaryExpenses = calculateTotal(reports.salaryExpenses);
     const vendorPayments = calculateTotal(reports.vendorPayments);
-    return employeeExpenses + salaryExpenses + vendorPayments;
+    const total = employeeExpenses + salaryExpenses + vendorPayments;
+    console.log('Calculating total expenses:', { 
+      employeeExpenses, 
+      salaryExpenses, 
+      vendorPayments, 
+      total,
+      rawData: {
+        employeeExpenses: reports.employeeExpenses,
+        salaryExpenses: reports.salaryExpenses,
+        vendorPayments: reports.vendorPayments
+      }
+    });
+    return total;
   };
 
   const calculateNetIncome = () => {
-    return calculateTotalIncome() - calculateTotalExpenses();
+    const income = calculateTotalIncome();
+    const expenses = calculateTotalExpenses();
+    const net = income - expenses;
+    console.log('Calculating net income:', { income, expenses, net });
+    return net;
   };
 
   const getMonthlyData = () => {
@@ -509,10 +561,13 @@ const Reports = () => {
           <div className="flex space-x-2">
             <button
               onClick={handleRefresh}
-              className="flex items-center px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              className="flex items-center px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors relative overflow-hidden group"
             >
-              <ArrowPathIcon className={`h-5 w-5 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
+              <span className="relative flex items-center justify-center w-6 h-6 mr-2">
+                <span className="absolute inset-0 rounded-full border-2 border-blue-400 animate-spin-slow group-hover:animate-spin-fast"></span>
+                <ArrowPathIcon className={`h-5 w-5 text-blue-500 z-10 ${loading ? 'animate-spin' : ''}`} />
+              </span>
+              <span className="font-semibold tracking-wide">Refresh</span>
             </button>
             <button
               onClick={exportToExcel}
@@ -597,12 +652,12 @@ const Reports = () => {
           {/* Charts Section */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
             {/* Income vs Expenses Chart */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Income vs Expenses</h3>
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 transition-transform duration-300 hover:scale-105 hover:shadow-2xl">
+              <h3 className="text-lg font-extrabold text-white mb-4 px-4 py-2 rounded-t-lg bg-gradient-to-r from-blue-500 to-blue-700 shadow-lg tracking-wide text-xl">Income vs Expenses</h3>
               <div className="h-80">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={getMonthlyData()}>
-                    <CartesianGrid strokeDasharray="3 3" />
+                  <BarChart data={getMonthlyData()} margin={{ left: 40, right: 20, top: 20, bottom: 10 }}>
+                    <CartesianGrid strokeDasharray="4 4" />
                     <XAxis dataKey="name" />
                     <YAxis />
                     <Tooltip />
@@ -615,35 +670,60 @@ const Reports = () => {
             </div>
 
             {/* Expense Distribution Chart */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Expense Distribution</h3>
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={calculateExpenseDistribution()}
-                      dataKey="value"
-                      nameKey="name"
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={80}
-                      label
-                    >
-                      {calculateExpenseDistribution().map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={['#EF4444', '#F59E0B', '#3B82F6'][index % 3]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
+                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 transition-transform duration-300 hover:scale-50 hover:shadow-2xl">
+                    <h3 className="text-lg font-extrabold text-white mb-4 px-4 py-2 rounded-t-lg bg-gradient-to-r from-pink-500 to-yellow-500 shadow-lg tracking-wide text-xl">Expense Distribution</h3>
+                    <div className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                      <Pie
+                        data={calculateExpenseDistribution()}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
+                        label={({ name, value }) => `₹${value.toLocaleString()}`}
+                        isAnimationActive={true}
+                        animationDuration={200}
+                        animationEasing="ease-in-out"
+                        activeIndex={null}
+                        activeShape={(props) => {
+                          const RADIAN = Math.PI / 180;
+                          const { cx, cy, midAngle, innerRadius, outerRadius, startAngle, endAngle, fill, payload, percent, value } = props;
+                          const sin = Math.sin(-RADIAN * midAngle);
+                          const cos = Math.cos(-RADIAN * midAngle);
+                          const sx = cx + (outerRadius + 10) * cos;
+                          const sy = cy + (outerRadius + 10) * sin;
+                          const mx = cx + (outerRadius + 30) * cos;
+                          const my = cy + (outerRadius + 30) * sin;
+                          const ex = mx + (cos >= 0 ? 1 : -1) * 22;
+                          const ey = my;
+                          return (
+                            <g>
+                              <circle cx={cx} cy={cy} r={outerRadius + 6} fill="#fbbf24" opacity={0.2} />
+                              <path d={`M${sx},${sy}L${mx},${my}L${ex},${ey}`} stroke={fill} fill="none"/>
+                              <circle cx={ex} cy={ey} r={2} fill={fill} stroke="none"/>
+                              <text x={ex + (cos >= 0 ? 1 : -1) * 12} y={ey} textAnchor={cos >= 0 ? 'start' : 'end'} fill="#333">{`${payload.name}: ₹${value.toLocaleString()}`}</text>
+                              <text x={cx} y={cy} dy={8} textAnchor="middle" fill={fill} fontWeight="bold">{`${(percent * 100).toFixed(0)}%`}</text>
+                            </g>
+                          );
+                        }}
+                      >
+                        {calculateExpenseDistribution().map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={['#EF4444', '#F59E0B', '#3B82F6'][index % 3]} style={{ transition: 'all 0.3s cubic-bezier(0.4,0,0.2,1)' }} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value) => `₹${value.toLocaleString()}`} />
+                      <Legend formatter={(value) => `${value}`} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    </div>
+                  </div>
+                  </div>
+                </>
+                )}
 
-      {/* Detailed Reports */}
+                {/* Detailed Reports */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Employee Expenses */}
         <motion.div
@@ -653,26 +733,37 @@ const Reports = () => {
           className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6"
         >
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Employee Expenses</h2>
-          <div className="space-y-4">
-            {Array.isArray(reports.employeeExpenses) && reports.employeeExpenses.length > 0 ? (
-              reports.employeeExpenses.map((expense) => (
-                <div key={expense._id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                  <div>
-                    <p className="font-medium text-gray-900 dark:text-white">{expense.employeeName}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">{expense.expenseType}</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500">{new Date(expense.date).toLocaleDateString()}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-gray-900 dark:text-white font-medium">{formatCurrency(expense.amountPaid)}</p>
-                    <p className={`text-xs ${expense.status === 'Approved' ? 'text-green-600' : 'text-yellow-600'}`}>
-                      {expense.status}
-                    </p>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="text-gray-500 dark:text-gray-400">No employee expenses found</p>
-            )}
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead className="bg-gradient-to-r from-blue-500 to-blue-700 dark:from-blue-800 dark:to-blue-900">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Employee</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Type</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Amount</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Remarks</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                {Array.isArray(reports.employeeExpenses) && reports.employeeExpenses.length > 0 ? (
+                  reports.employeeExpenses.map((expense, index) => (
+                    <tr key={expense._id || index} className="transition-all duration-200 hover:bg-blue-50 dark:hover:bg-blue-900/40">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">{formatDate(expense.date)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">{expense.employeeName || '-'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">{expense.expenseType || '-'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white font-medium">{formatAmount(expense.amountPaid)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">{expense.status || '-'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">{expense.remarks || '-'}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="6" className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">No employee expenses found</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </motion.div>
 
@@ -783,48 +874,37 @@ const Reports = () => {
           className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6"
         >
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Vendor Payments</h2>
-          <div className="space-y-4">
-            {Array.isArray(reports.vendorPayments) && reports.vendorPayments.length > 0 ? (
-              reports.vendorPayments.map((payment) => (
-                <div key={payment._id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                  <div>
-                    <p className="font-medium text-gray-900 dark:text-white">{payment.vendorName}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">{payment.paymentType}</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500">{new Date(payment.date).toLocaleDateString()}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-gray-900 dark:text-white font-medium">{formatCurrency(payment.amount)}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{payment.status}</p>
-                  </div>
-                  <div className="flex space-x-2 ml-4">
-                    <button 
-                      className="text-primary-600 hover:text-primary-900 dark:text-primary-400 dark:hover:text-primary-300"
-                      onClick={() => window.location.href = `/vendor-payments/edit/${payment._id}`}
-                    >
-                      <PencilIcon className="h-5 w-5" />
-                    </button>
-                    <button 
-                      className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
-                      onClick={() => {
-                        if (window.confirm('Are you sure you want to delete this vendor payment?')) {
-                          vendorPaymentApi.delete(payment._id)
-                            .then(() => {
-                              handleRefresh();
-                            })
-                            .catch(err => {
-                              console.error('Error deleting vendor payment:', err);
-                            });
-                        }
-                      }}
-                    >
-                      <TrashIcon className="h-5 w-5" />
-                    </button>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="text-gray-500 dark:text-gray-400">No vendor payments found</p>
-            )}
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead className="bg-gradient-to-r from-purple-500 to-pink-600 dark:from-purple-800 dark:to-pink-900">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Vendor</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Type</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Amount</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Remarks</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                {Array.isArray(reports.vendorPayments) && reports.vendorPayments.length > 0 ? (
+                  reports.vendorPayments.map((payment, index) => (
+                    <tr key={payment._id || index} className="transition-all duration-200 hover:bg-pink-50 dark:hover:bg-pink-900/40">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">{formatDate(payment.date)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">{payment.vendorName || '-'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">{payment.paymentType || '-'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white font-medium">{formatAmount(payment.amount)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">{payment.status || '-'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">{payment.remarks || '-'}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="6" className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">No vendor payments found</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </motion.div>
 
@@ -836,50 +916,35 @@ const Reports = () => {
           className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6"
         >
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Income</h2>
-          <div className="space-y-4">
-            {!reports.income || reports.income.length === 0 ? (
-              <div className="text-center py-4 text-gray-500 dark:text-gray-400">
-                No income entries found
-              </div>
-            ) : (
-              reports.income.map((item) => (
-                <div key={item._id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                  <div>
-                    <p className="font-medium text-gray-900 dark:text-white">{item.source}</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">{item.remarks}</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500">{new Date(item.date).toLocaleDateString()}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-gray-900 dark:text-white font-medium">{formatCurrency(item.amountReceived)}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{item.paymentMethod}</p>
-                  </div>
-                  <div className="flex space-x-2 ml-4">
-                    <button 
-                      className="text-primary-600 hover:text-primary-900 dark:text-primary-400 dark:hover:text-primary-300"
-                      onClick={() => window.location.href = `/income/edit/${item._id}`}
-                    >
-                      <PencilIcon className="h-5 w-5" />
-                    </button>
-                    <button 
-                      className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
-                      onClick={() => {
-                        if (window.confirm('Are you sure you want to delete this income entry?')) {
-                          incomeApi.delete(item._id)
-                            .then(() => {
-                              handleRefresh();
-                            })
-                            .catch(err => {
-                              console.error('Error deleting income entry:', err);
-                            });
-                        }
-                      }}
-                    >
-                      <TrashIcon className="h-5 w-5" />
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead className="bg-gradient-to-r from-green-500 to-teal-600 dark:from-green-800 dark:to-teal-900">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Source</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Amount</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Payment Method</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-white uppercase tracking-wider">Remarks</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                {Array.isArray(reports.income) && reports.income.length > 0 ? (
+                  reports.income.map((item, index) => (
+                    <tr key={item._id || index} className="transition-all duration-200 hover:bg-green-50 dark:hover:bg-green-900/40">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">{formatDate(item.date)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">{item.source || '-'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white font-medium">{formatAmount(item.amountReceived)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">{item.paymentMethod || '-'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">{item.remarks || '-'}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="5" className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">No income entries found</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </motion.div>
       </div>

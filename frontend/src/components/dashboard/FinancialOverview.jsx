@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { ArrowPathIcon } from '@heroicons/react/24/outline';
 import { useCurrencyFormat } from '../../utils/formUtils';
 import { 
   employeeExpenseApi, 
@@ -11,6 +12,7 @@ import {
 const FinancialOverview = () => {
   const formatCurrency = useCurrencyFormat();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [data, setData] = useState({
     totalIncome: 0,
@@ -23,74 +25,94 @@ const FinancialOverview = () => {
     }
   });
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
+  const fetchData = async (isRefresh = false) => {
+    try {
+      if (isRefresh) {
+        setRefreshing(true);
+      } else {
         setLoading(true);
-        setError(null);
-
-        // Fetch all data in parallel
-        const [
-          employeeExpensesResponse,
-          salaryExpensesResponse,
-          vendorPaymentsResponse,
-          incomesResponse
-        ] = await Promise.all([
-          employeeExpenseApi.getAll(),
-          salaryExpenseApi.getAll(),
-          vendorPaymentApi.getAll(),
-          incomeApi.getAll()
-        ]);
-
-        // Extract data from responses
-        const employeeExpenses = employeeExpensesResponse.data || [];
-        const salaryExpenses = salaryExpensesResponse.data || [];
-        const vendorPayments = vendorPaymentsResponse.data || [];
-        const incomes = incomesResponse.data || [];
-
-        console.log('Fetched data:', {
-          employeeExpenses,
-          salaryExpenses,
-          vendorPayments,
-          incomes
-        });
-
-        // Calculate totals
-        const totalEmployeeExpenses = employeeExpenses.reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
-        const totalSalaryExpenses = salaryExpenses.reduce((sum, expense) => sum + (parseFloat(expense.amountPaid) || 0), 0);
-        const totalVendorPayments = vendorPayments.reduce((sum, payment) => sum + (parseFloat(payment.amount) || 0), 0);
-        const totalIncome = incomes.reduce((sum, income) => sum + (parseFloat(income.amount) || 0), 0);
-
-        const totalExpenses = totalEmployeeExpenses + totalSalaryExpenses + totalVendorPayments;
-
-        console.log('Calculated totals:', {
-          totalEmployeeExpenses,
-          totalSalaryExpenses,
-          totalVendorPayments,
-          totalIncome,
-          totalExpenses
-        });
-
-        setData({
-          totalIncome,
-          totalExpenses,
-          netIncome: totalIncome - totalExpenses,
-          expenseBreakdown: {
-            employeeExpenses: totalEmployeeExpenses,
-            salaryExpenses: totalSalaryExpenses,
-            vendorPayments: totalVendorPayments
-          }
-        });
-      } catch (err) {
-        console.error('Error fetching financial data:', err);
-        setError('Failed to load financial data. Please try again later.');
-      } finally {
-        setLoading(false);
       }
-    };
+      setError(null);
 
+      // Add cache-busting timestamp to prevent stale data
+      const timestamp = Date.now();
+      console.log('FinancialOverview: Fetching data with timestamp:', timestamp);
+      
+      // Fetch all data in parallel with cache busting
+      const [
+        employeeExpensesResponse,
+        salaryExpensesResponse,
+        vendorPaymentsResponse,
+        incomesResponse
+      ] = await Promise.all([
+        employeeExpenseApi.getAll(),
+        salaryExpenseApi.getAll(),
+        vendorPaymentApi.getAll(),
+        incomeApi.getAll()
+      ]);
+
+      // Extract data from responses
+      const employeeExpenses = employeeExpensesResponse.data || [];
+      const salaryExpenses = salaryExpensesResponse.data || [];
+      const vendorPayments = vendorPaymentsResponse.data || [];
+      const incomes = incomesResponse.data || [];
+
+      console.log('Fetched fresh data:', {
+        timestamp,
+        employeeExpenses: employeeExpenses.length,
+        salaryExpenses: salaryExpenses.length,
+        vendorPayments: vendorPayments.length,
+        incomes: incomes.length
+      });
+
+      // Calculate totals
+      const totalEmployeeExpenses = employeeExpenses.reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
+      const totalSalaryExpenses = salaryExpenses.reduce((sum, expense) => sum + (parseFloat(expense.amountPaid) || 0), 0);
+      const totalVendorPayments = vendorPayments.reduce((sum, payment) => sum + (parseFloat(payment.amount) || 0), 0);
+      const totalIncome = incomes.reduce((sum, income) => sum + (parseFloat(income.amount) || 0), 0);
+
+      const totalExpenses = totalEmployeeExpenses + totalSalaryExpenses + totalVendorPayments;
+
+      console.log('Calculated fresh totals:', {
+        totalEmployeeExpenses,
+        totalSalaryExpenses,
+        totalVendorPayments,
+        totalIncome,
+        totalExpenses
+      });
+
+      setData({
+        totalIncome,
+        totalExpenses,
+        netIncome: totalIncome - totalExpenses,
+        expenseBreakdown: {
+          employeeExpenses: totalEmployeeExpenses,
+          salaryExpenses: totalSalaryExpenses,
+          vendorPayments: totalVendorPayments
+        }
+      });
+    } catch (err) {
+      console.error('Error fetching financial data:', err);
+      setError('Failed to load financial data. Please try again later.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
     fetchData();
+    
+    // Listen for dashboard refresh events
+    const handleRefresh = () => fetchData(true);
+    window.addEventListener('dashboardRefresh', handleRefresh);
+    
+    return () => window.removeEventListener('dashboardRefresh', handleRefresh);
   }, []);
+
+  const handleManualRefresh = () => {
+    fetchData(true);
+  };
 
   if (loading) {
     return (
@@ -110,6 +132,19 @@ const FinancialOverview = () => {
 
   return (
     <div className="space-y-6">
+      {/* Header with Refresh Button */}
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Financial Overview</h2>
+        <button
+          onClick={handleManualRefresh}
+          disabled={refreshing}
+          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+        >
+          <ArrowPathIcon className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+          {refreshing ? 'Refreshing...' : 'Refresh Data'}
+        </button>
+      </div>
+
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <motion.div

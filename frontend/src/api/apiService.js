@@ -8,13 +8,20 @@ const apiClient = axios.create({
   }
 });
 
-// Add request interceptor for handling auth tokens if needed
+// Add request interceptor for handling auth tokens and cache busting
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`;
     }
+    
+    // Add cache busting header
+    config.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+    config.headers['Pragma'] = 'no-cache';
+    config.headers['Expires'] = '0';
+    config.headers['X-Timestamp'] = Date.now();
+    
     return config;
   },
   (error) => {
@@ -181,6 +188,14 @@ export const dashboardApi = {
   getMonthlyData: (params) => apiClient.get('/api/dashboard/monthly-data', { params })
 };
 
+// Admin API calls
+export const adminApi = {
+  getAllUsers: () => apiClient.get('/api/admin/users'),
+  getUserStats: () => apiClient.get('/api/admin/stats'),
+  updateUserRole: (userId, role) => apiClient.put(`/api/admin/users/${userId}/role`, { role }),
+  deleteUser: (userId) => apiClient.delete(`/api/admin/users/${userId}`)
+};
+
 export default {
   authApi,
   employeeExpenseApi,
@@ -190,5 +205,6 @@ export default {
   reportsApi,
   excelApi,
   aiApi,
-  dashboardApi
+  dashboardApi,
+  adminApi
 };

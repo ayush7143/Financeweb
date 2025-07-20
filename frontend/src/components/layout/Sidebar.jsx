@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   HomeIcon,
@@ -16,6 +17,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 const Sidebar = ({ isOpen, toggleSidebar }) => {
+  const { user } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const { theme } = useTheme();
@@ -62,7 +64,8 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
     { path: '/excel-upload', label: 'Excel Upload', icon: DocumentArrowUpIcon },
     { path: '/reports', label: 'Reports', icon: ChartPieIcon },
     { path: '/categorization', label: 'Categorization', icon: ChartLineIcon },
-    { path: '/settings', label: 'Settings', icon: Cog6ToothIcon }
+    { path: '/settings', label: 'Settings', icon: Cog6ToothIcon },
+    ...(user?.role === 'admin' ? [{ path: '/admin', label: 'Admin Panel', icon: UserGroupIcon }] : [])
   ];
 
   // Animation variants

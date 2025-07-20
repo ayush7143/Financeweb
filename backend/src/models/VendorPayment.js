@@ -10,7 +10,11 @@ const vendorPaymentSchema = new mongoose.Schema({
     CGST: { type: Number, default: 0 },
     remarks: { type: String },
     invoiceNumber: { type: String, required: true },
-    status: { type: String, default: 'Pending' }
+    status: { 
+        type: String, 
+        enum: ['Pending', 'Paid', 'Cancelled'], 
+        default: 'Pending' 
+    }
 }, { timestamps: true });
 
 module.exports = mongoose.model('VendorPayment', vendorPaymentSchema);

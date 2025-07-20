@@ -23,7 +23,10 @@ const ExpenseForecasting = lazy(() => import('../pages/ExpenseForecasting'));
 const Login = lazy(() => import('../pages/Login'));
 const Register = lazy(() => import('../pages/Register'));
 const ForgotPassword = lazy(() => import('../pages/ForgotPassword'));
+const ResetPassword = lazy(() => import('../pages/ResetPassword'));
+const AuthSuccess = lazy(() => import('../pages/AuthSuccess'));
 const Settings = lazy(() => import('../pages/Settings'));
+const AdminPanel = lazy(() => import('../pages/AdminPanel'));
 
 const AppRoutes = () => {
   return (
@@ -54,6 +57,18 @@ const AppRoutes = () => {
             </GuestGuard>
           }
         />
+        <Route
+          path="/reset-password"
+          element={
+            <GuestGuard>
+              <ResetPassword />
+            </GuestGuard>
+          }
+        />
+        <Route
+          path="/auth-success"
+          element={<AuthSuccess />}
+        />
 
         {/* Protected routes */}
         <Route
@@ -74,6 +89,7 @@ const AppRoutes = () => {
           <Route path="forecasting" element={<ExpenseForecasting />} />
           <Route path="settings" element={<Settings />} />
           <Route path="transactions" element={<Transactions />} />
+          <Route path="admin" element={<AdminPanel />} />
         </Route>
 
         {/* Fallback route */}

@@ -7,6 +7,7 @@ import { CalendarIcon, BuildingOfficeIcon, DocumentTextIcon, PencilIcon, TrashIc
 import { CheckCircleIcon, ExclamationCircleIcon } from '@heroicons/react/24/solid';
 import { useSettings } from '../../context/SettingsContext';
 import { useForm } from 'react-hook-form';
+import { triggerDashboardRefresh } from '../../utils/dashboardUtils';
 import axios from 'axios';
 
 const IncomeEntryForm = ({ income, onSubmit, onCancel, showForm: initialShowForm = false, setShowForm: parentSetShowForm }) => {
@@ -127,6 +128,9 @@ const IncomeEntryForm = ({ income, onSubmit, onCancel, showForm: initialShowForm
       }
 
       if (response) {
+        // Trigger dashboard refresh to update charts
+        triggerDashboardRefresh();
+        
         // Refresh the list
         await loadIncomes();
         
@@ -452,6 +456,7 @@ const IncomeEntryForm = ({ income, onSubmit, onCancel, showForm: initialShowForm
                             if (window.confirm('Are you sure you want to delete this income entry?')) {
                               incomeApi.delete(entry._id)
                                 .then(() => {
+                                  triggerDashboardRefresh(); // Trigger dashboard refresh
                                   loadIncomes();
                                   setSuccess('Income entry deleted successfully');
                                 })

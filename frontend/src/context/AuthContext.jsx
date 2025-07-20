@@ -139,6 +139,30 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('user', JSON.stringify(updatedUser));
   };
 
+  const loginWithToken = async (token) => {
+    try {
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      const { data } = await authApi.getCurrentUser();
+      
+      if (data.user) {
+        setAuthState({
+          user: data.user,
+          token,
+          isLoading: false,
+          isInitialized: true,
+          error: null
+        });
+        localStorage.setItem('user', JSON.stringify(data.user));
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Token login failed:', error);
+      handleLogout();
+      return false;
+    }
+  };
+
   const value = {
     user: authState.user,
     isAuthenticated: !!authState.user,
@@ -148,7 +172,8 @@ export const AuthProvider = ({ children }) => {
     login: handleLogin,
     logout: handleLogout,
     register: handleRegister,
-    updateUser
+    updateUser,
+    loginWithToken
   };
 
   return (
