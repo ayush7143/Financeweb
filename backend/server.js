@@ -83,7 +83,7 @@ const employeeExpenseRoutes = require('./routes/employeeExpense.routes');
 const salaryExpenseRoutes = require('./routes/salaryExpense.routes');
 const vendorPaymentRoutes = require('./routes/vendorPayment.routes');
 const referenceDataRoutes = require('./routes/referenceData.routes');
-const aiRoutes = require('./routes/aiRoutes');
+// const aiRoutes = require('./routes/aiRoutes');
 
 // Use routes
 app.use('/api/auth', authRoutes);
@@ -92,7 +92,7 @@ app.use('/api/employee-expense', employeeExpenseRoutes);
 app.use('/api/salary-expense', salaryExpenseRoutes);
 app.use('/api/vendor-payment', vendorPaymentRoutes);
 app.use('/api/reference', referenceDataRoutes);
-app.use('/api/ai', aiRoutes);
+// app.use('/api/ai', aiRoutes);
 
 // Change app.listen to server.listen
 server.listen(PORT, () => {
