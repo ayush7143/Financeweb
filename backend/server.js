@@ -1,11 +1,17 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-require('dotenv').config();
 const morgan = require('morgan');
 const winston = require('winston');
+const session = require('express-session');
+const passport = require('passport');
+const cookieParser = require('cookie-parser');
+require('dotenv').config();
 
-// Configure Winston logger
+// Passport config
+require('./passport');
+
+// Logger setup
 const logger = winston.createLogger({
   level: 'info',
   format: winston.format.combine(
@@ -29,7 +35,7 @@ const logger = winston.createLogger({
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Add request logging
+// Middlewares
 app.use(morgan('dev', {
   stream: {
     write: (message) => logger.info(message.trim())
@@ -42,13 +48,29 @@ app.use(cors({
 }));
 
 app.use(express.json());
+app.use(cookieParser());
 
-// Add error handling middleware
-app.use((err, req, res, next) => {
-  logger.error(`Error: ${err.message}`);
-  res.status(500).json({ error: 'Internal Server Error' });
-});
+// Express Session
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || 'your-session-secret',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+  secure: process.env.NODE_ENV === 'production', // set to true on Render
+  httpOnly: true,
+  sameSite: 'lax', // or 'none' if frontend is on a different domain with HTTPS
+  maxAge: 24 * 60 * 60 * 1000
+}
 
+  })
+);
+
+// Initialize Passport middleware
+app.use(passport.initialize());
+app.use(passport.session());
+
+// MongoDB connection
 mongoose.connect(process.env.DB_CONNECTION_STRING, {
   useNewUrlParser: true,
   useUnifiedTopology: true
@@ -58,7 +80,7 @@ mongoose.connect(process.env.DB_CONNECTION_STRING, {
   logger.error(`Failed to connect to MongoDB: ${err.message}`);
 });
 
-// Enable WebSocket
+// WebSocket Setup
 const server = require('http').createServer(app);
 const io = require('socket.io')(server, {
   cors: {
@@ -67,34 +89,35 @@ const io = require('socket.io')(server, {
   }
 });
 
-// Socket.io connection logging
 io.on('connection', (socket) => {
   logger.info(`Client connected: ${socket.id}`);
-  
   socket.on('disconnect', () => {
     logger.info(`Client disconnected: ${socket.id}`);
   });
 });
 
-// Import routes
+// Routes
 const authRoutes = require('./routes/auth.routes');
 const incomeRoutes = require('./routes/income.routes');
 const employeeExpenseRoutes = require('./routes/employeeExpense.routes');
 const salaryExpenseRoutes = require('./routes/salaryExpense.routes');
 const vendorPaymentRoutes = require('./routes/vendorPayment.routes');
 const referenceDataRoutes = require('./routes/referenceData.routes');
-// const aiRoutes = require('./routes/aiRoutes');
 
-// Use routes
 app.use('/api/auth', authRoutes);
 app.use('/api/income', incomeRoutes);
 app.use('/api/employee-expense', employeeExpenseRoutes);
 app.use('/api/salary-expense', salaryExpenseRoutes);
 app.use('/api/vendor-payment', vendorPaymentRoutes);
 app.use('/api/reference', referenceDataRoutes);
-// app.use('/api/ai', aiRoutes);
 
-// Change app.listen to server.listen
+// Error Handler
+app.use((err, req, res, next) => {
+  logger.error(`Error: ${err.message}`);
+  res.status(500).json({ error: 'Internal Server Error' });
+});
+
+// Start Server
 server.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
 });
