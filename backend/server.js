@@ -9,7 +9,7 @@ const cookieParser = require('cookie-parser');
 require('dotenv').config();
 
 // Passport config
-require('./passport');
+require('./src/config/passport');
 
 // Logger setup
 const logger = winston.createLogger({
