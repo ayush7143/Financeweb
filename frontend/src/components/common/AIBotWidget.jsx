@@ -28,12 +28,19 @@ export default function AIBotWidget() {
   useEffect(() => {
     if (isOpen && history.length === 0) {
       setLoading(true);
-      aiApi.ask('Show me a summary of my income and expenses.').then(res => {
-        const aiText = res?.data?.answer || res?.data?.message || 'AI response received.';
-        setHistory([{ role: 'ai', text: aiText }]);
-      }).catch(() => {
-        setHistory([{ role: 'ai', text: 'Sorry, I could not fetch your summary.' }]);
-      }).finally(() => setLoading(false));
+      aiApi.ask('Show me a summary of my income and expenses.')
+        .then(res => {
+          const aiText = res?.data?.answer || res?.data?.message || 'AI response received.';
+          setHistory([{ role: 'ai', text: aiText }]);
+        })
+        .catch((err) => {
+          let msg = 'Sorry, I could not fetch your summary.';
+          if (err?.response?.data?.error?.includes('quota') || err?.response?.data?.error?.includes('limit')) {
+            msg = 'AI service unavailable: quota exceeded. Please check your API key or try again later.';
+          }
+          setHistory([{ role: 'ai', text: msg }]);
+        })
+        .finally(() => setLoading(false));
     }
   }, [isOpen]);
 
@@ -51,8 +58,12 @@ export default function AIBotWidget() {
       });
       setHistory(h => [...h, { role: 'ai', text: aiText }]);
     } catch (err) {
-      setError('AI service error. Please try again.');
-      setHistory(h => [...h, { role: 'ai', text: 'Sorry, I could not process your request.' }]);
+      let msg = 'Sorry, I could not process your request.';
+      if (err?.response?.data?.error?.includes('quota') || err?.response?.data?.error?.includes('limit')) {
+        msg = 'AI service unavailable: quota exceeded. Please check your API key or try again later.';
+      }
+      setError('AI service error.');
+      setHistory(h => [...h, { role: 'ai', text: msg }]);
     } finally {
       setLoading(false);
     }

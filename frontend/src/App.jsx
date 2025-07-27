@@ -6,6 +6,7 @@ import { SettingsProvider } from './context/SettingsContext';
 import { createTestUsers } from './utils/testUsers';
 import apiService from './api/apiService';
 import AppRoutes from './routes';
+import AIBotWidget from './components/common/AIBotWidget';
 import { SnackbarProvider } from './context/SnackbarContext';
 
 // App Initializer
@@ -33,6 +34,7 @@ const App = () => {
               <AppInitializer>
                 <div className="flex flex-col min-h-screen">
                   <AppRoutes />
+                  <AIBotWidget />
                 </div>
               </AppInitializer>
             </SnackbarProvider>
